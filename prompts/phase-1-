@@ -1,0 +1,1196 @@
+### PHASE 1.1: Custom Protocol Design & Implementation
+
+**Phase Context**: Phase 1 builds the communication foundation between browser and backend. By the end of this sub-phase, you'll have a working binary protocol specification and implementation that can exchange structured messages between Go server and JavaScript client.
+
+**Sub-Phase Objective**: Create the communication protocol between browser client and backend services, including protocol specification, binary message format, and Go/JavaScript implementations.
+
+**Prerequisites**: 
+- None - this is the foundational sub-phase
+- Understanding of binary protocol design
+- Knowledge of Go's `encoding/binary` package
+- JavaScript typed arrays experience
+
+**Integration Point**: This protocol will be used by all subsequent sub-phases (WebSocket server, connection management, security, etc.) as the foundation for all client-server communication.
+
+---
+
+## IMPLEMENTATION REQUIREMENTS
+
+### Overview
+
+You are implementing a custom binary protocol for web-based operating system communication, inspired by WebSocket but optimized for this project's specific needs. This protocol will handle all communication between the browser client and Go backend.
+
+**Key Constraints**:
+- ✅ Use ONLY Go standard library (no external dependencies)
+- ✅ All code must be production-ready and fully tested
+- ✅ Must be compatible with JavaScript client (typed arrays)
+- ✅ Must handle all error cases explicitly
+- ✅ Must include comprehensive documentation
+
+---
+
+### Directory Structure
+
+Create the following structure:
+
+```
+webos/
+├── pkg/
+│   └── protocol/
+│       ├── doc.go              # Package documentation
+│       ├── opcode.go           # Opcode definitions
+│       ├── message.go          # Message encoding/decoding
+│       ├── codec.go            # Binary codec implementation
+│       └── protocol_test.go    # Comprehensive tests
+├── static/
+│   └── js/
+│       └── protocol.js         # JavaScript client implementation
+└── cmd/
+    └── protocol-demo/
+        └── main.go             # Demonstration program
+```
+
+---
+
+### Core Types and Interfaces
+
+**Define the following types**:
+
+```go
+package protocol
+
+// Opcode represents the message type identifier
+type Opcode uint8
+
+// Message represents a protocol message
+type Message struct {
+    Opcode    Opcode
+    Timestamp int64
+    Payload   []byte
+}
+
+// Protocol handler interface
+type Handler interface {
+    HandleMessage(msg Message) error
+    Close() error
+}
+
+// Constants
+const (
+    MagicBytes     = [4]byte{'W', 'E', 'B', 'S'}
+    ProtocolVersion = 1
+    HeaderSize      = 14 // 4 magic + 1 version + 1 opcode + 8 timestamp
+    MaxPayloadSize  = 16 * 1024 * 1024 // 16 MB
+)
+
+// Opcodes - define based on DEVPLAN.md
+const (
+    OpcodeDisplay Opcode = iota + 1
+    OpcodeInput
+    OpcodeFileSystem
+    OpcodeNetwork
+    OpcodeProcess
+    OpcodeAuth
+    // ... more opcodes as needed
+)
+```
+
+---
+
+### Implementation Steps
+
+Follow these steps in order:
+
+#### STEP 1: Protocol Specification Document
+
+**Purpose**: Create a formal specification document for the protocol
+
+**Implementation**:
+
+Create `docs/PROTOCOL_SPEC.md`:
+```markdown
+# WebOS Binary Protocol Specification
+
+## Overview
+This document defines the binary protocol for WebOS client-server communication.
+
+## Message Format
+All messages follow this format:
+- Magic Bytes: 4 bytes ("WEBS")
+- Version: 1 byte (current: 1)
+- Opcode: 1 byte (message type)
+- Timestamp: 8 bytes (Unix nanoseconds)
+- Length: 4 bytes (payload length, big-endian)
+- Payload: N bytes (variable)
+
+## Opcodes
+| Opcode | Value | Description |
+|--------|-------|-------------|
+| DISPLAY | 1 | Display rendering instructions |
+| INPUT | 2 | Keyboard/mouse input events |
+| FILESYSTEM | 3 | File system operations |
+| NETWORK | 4 | Network operations |
+| PROCESS | 5 | Process management |
+| AUTH | 6 | Authentication |
+
+## Examples
+[Include message examples]
+```
+
+**Requirements**:
+- RFC-style specification format
+- Clear message format diagrams
+- Complete opcode reference
+- Example message formats
+
+**Validation**:
+```bash
+# Verify document exists
+ls -la docs/PROTOCOL_SPEC.md
+```
+
+---
+
+#### STEP 2: Go Protocol Package Implementation
+
+**Purpose**: Implement the core protocol package in Go
+
+**Implementation**:
+
+Create `pkg/protocol/opcode.go`:
+```go
+package protocol
+
+// Opcode represents message type identifiers
+type Opcode uint8
+
+// Protocol opcodes
+const (
+    OpcodeInvalid Opcode = iota
+    OpcodeDisplay
+    OpcodeInput
+    OpcodeFileSystem
+    OpcodeNetwork
+    OpcodeProcess
+    OpcodeAuth
+    OpcodeConnect
+    OpcodeDisconnect
+    OpcodePing
+    OpcodePong
+    OpcodeError
+)
+
+// String returns the opcode name
+func (o Opcode) String() string {
+    switch o {
+    case OpcodeDisplay:
+        return "DISPLAY"
+    case OpcodeInput:
+        return "INPUT"
+    case OpcodeFileSystem:
+        return "FILESYSTEM"
+    case OpcodeNetwork:
+        return "NETWORK"
+    case OpcodeProcess:
+        return "PROCESS"
+    case OpcodeAuth:
+        return "AUTH"
+    case OpcodeConnect:
+        return "CONNECT"
+    case OpcodeDisconnect:
+        return "DISCONNECT"
+    case OpcodePing:
+        return "PING"
+    case OpcodePong:
+        return "PONG"
+    case OpcodeError:
+        return "ERROR"
+    default:
+        return "UNKNOWN"
+    }
+}
+
+// IsValid checks if the opcode is valid
+func (o Opcode) IsValid() bool {
+    return o >= OpcodeDisplay && o <= OpcodeError
+}
+```
+
+Create `pkg/protocol/message.go`:
+```go
+package protocol
+
+import (
+    "encoding/binary"
+    "errors"
+    "time"
+)
+
+var (
+    ErrInvalidMagic     = errors.New("invalid magic bytes")
+    ErrInvalidVersion   = errors.New("invalid protocol version")
+    ErrInvalidOpcode    = errors.New("invalid opcode")
+    ErrPayloadTooLarge  = errors.New("payload exceeds maximum size")
+    ErrBufferTooSmall   = errors.New("buffer too small")
+    ErrInvalidTimestamp = errors.New("invalid timestamp")
+)
+
+// Message represents a protocol message
+type Message struct {
+    Opcode    Opcode
+    Timestamp int64
+    Payload   []byte
+}
+
+// Encode encodes the message to binary format
+func (m *Message) Encode() ([]byte, error) {
+    // Calculate total size
+    totalSize := HeaderSize + len(m.Payload)
+    buf := make([]byte, totalSize)
+    
+    // Write magic bytes
+    copy(buf[0:4], MagicBytes[:])
+    
+    // Write version
+    buf[4] = ProtocolVersion
+    
+    // Write opcode
+    buf[5] = byte(m.Opcode)
+    
+    // Write timestamp (big-endian)
+    binary.BigEndian.PutUint64(buf[6:14], uint64(m.Timestamp))
+    
+    // Write payload length
+    binary.BigEndian.PutUint32(buf[14:18], uint32(len(m.Payload)))
+    
+    // Write payload
+    if len(m.Payload) > 0 {
+        copy(buf[HeaderSize:], m.Payload)
+    }
+    
+    return buf, nil
+}
+
+// Decode decodes a message from binary format
+func (m *Message) Decode(data []byte) error {
+    // Validate minimum size
+    if len(data) < HeaderSize {
+        return ErrBufferTooSmall
+    }
+    
+    // Validate magic bytes
+    if string(data[0:4]) != string(MagicBytes[:]) {
+        return ErrInvalidMagic
+    }
+    
+    // Validate version
+    if data[4] != ProtocolVersion {
+        return ErrInvalidVersion
+    }
+    
+    // Read opcode
+    m.Opcode = Opcode(data[5])
+    if !m.Opcode.IsValid() {
+        return ErrInvalidOpcode
+    }
+    
+    // Read timestamp
+    m.Timestamp = int64(binary.BigEndian.Uint64(data[6:14]))
+    if m.Timestamp < 0 {
+        return ErrInvalidTimestamp
+    }
+    
+    // Read payload length
+    payloadLen := binary.BigEndian.Uint32(data[14:18])
+    if payloadLen > MaxPayloadSize {
+        return ErrPayloadTooLarge
+    }
+    
+    // Validate buffer size
+    if uint32(len(data)-HeaderSize) < payloadLen {
+        return ErrBufferTooSmall
+    }
+    
+    // Read payload
+    if payloadLen > 0 {
+        m.Payload = make([]byte, payloadLen)
+        copy(m.Payload, data[HeaderSize:HeaderSize+payloadLen])
+    }
+    
+    return nil
+}
+
+// NewMessage creates a new message with current timestamp
+func NewMessage(opcode Opcode, payload []byte) *Message {
+    return &Message{
+        Opcode:    opcode,
+        Timestamp: time.Now().UnixNano(),
+        Payload:   payload,
+    }
+}
+```
+
+**Requirements**:
+- Implement all opcode constants
+- Implement message encoding/decoding
+- Handle all error cases
+- Use big-endian byte order for network compatibility
+- Support payloads up to 16MB
+
+**Validation**:
+```bash
+go build ./pkg/protocol/
+go vet ./pkg/protocol/
+```
+
+---
+
+#### STEP 3: JavaScript Protocol Implementation
+
+**Purpose**: Implement the client-side protocol in vanilla JavaScript
+
+**Implementation**:
+
+Create `static/js/protocol.js`:
+```javascript
+/**
+ * WebOS Protocol Client
+ * Implements the binary protocol for browser-server communication
+ */
+
+class ProtocolClient {
+    /**
+     * Protocol opcodes matching Go implementation
+     */
+    static get Opcodes() {
+        return {
+            DISPLAY: 1,
+            INPUT: 2,
+            FILESYSTEM: 3,
+            NETWORK: 4,
+            PROCESS: 5,
+            AUTH: 6,
+            CONNECT: 7,
+            DISCONNECT: 8,
+            PING: 9,
+            PONG: 10,
+            ERROR: 11
+        };
+    }
+    
+    /**
+     * Protocol constants
+     */
+    static get Constants() {
+        return {
+            MAGIC_BYTES: new Uint8Array([0x57, 0x45, 0x42, 0x53]), // "WEBS"
+            PROTOCOL_VERSION: 1,
+            HEADER_SIZE: 14
+        };
+    }
+    
+    /**
+     * Create a message buffer
+     * @param {number} opcode - Message opcode
+     * @param {Uint8Array} payload - Message payload
+     * @returns {Uint8Array} Encoded message
+     */
+    static encodeMessage(opcode, payload) {
+        const header = new Uint8Array(14);
+        const payloadLength = payload ? payload.length : 0;
+        const totalSize = 14 + payloadLength;
+        const buffer = new Uint8Array(totalSize);
+        
+        // Write magic bytes
+        buffer.set(ProtocolClient.Constants.MAGIC_BYTES, 0);
+        
+        // Write version
+        buffer[4] = ProtocolClient.Constants.PROTOCOL_VERSION;
+        
+        // Write opcode
+        buffer[5] = opcode;
+        
+        // Write timestamp (big-endian, 8 bytes)
+        const timestamp = Date.now() * 1000000; // nanoseconds
+        const timestampView = new DataView(new ArrayBuffer(8));
+        timestampView.setBigUint64(0, BigInt(timestamp), false);
+        buffer.set(new Uint8Array(timestampView.buffer), 6);
+        
+        // Write payload length (4 bytes, big-endian)
+        const lengthView = new DataView(new ArrayBuffer(4));
+        lengthView.setUint32(0, payloadLength, false);
+        buffer.set(new Uint8Array(lengthView.buffer), 14);
+        
+        // Write payload
+        if (payload && payloadLength > 0) {
+            buffer.set(payload, 18);
+        }
+        
+        return buffer;
+    }
+    
+    /**
+     * Decode a message from buffer
+     * @param {Uint8Array} buffer - Message buffer
+     * @returns {Object} Decoded message {opcode, timestamp, payload}
+     */
+    static decodeMessage(buffer) {
+        if (buffer.length < 14) {
+            throw new Error('Buffer too small');
+        }
+        
+        // Validate magic bytes
+        const magic = buffer.slice(0, 4);
+        for (let i = 0; i < 4; i++) {
+            if (magic[i] !== ProtocolClient.Constants.MAGIC_BYTES[i]) {
+                throw new Error('Invalid magic bytes');
+            }
+        }
+        
+        // Read version
+        const version = buffer[4];
+        if (version !== ProtocolClient.Constants.PROTOCOL_VERSION) {
+            throw new Error(`Invalid protocol version: ${version}`);
+        }
+        
+        // Read opcode
+        const opcode = buffer[5];
+        
+        // Read timestamp
+        const timestampView = new DataView(buffer.buffer, 6, 8);
+        const timestamp = timestampView.getBigUint64(0, false);
+        
+        // Read payload length
+        const lengthView = new DataView(buffer.buffer, 14, 4);
+        const payloadLength = lengthView.getUint32(0, false);
+        
+        // Read payload
+        let payload = null;
+        if (payloadLength > 0) {
+            payload = buffer.slice(18, 18 + payloadLength);
+        }
+        
+        return {
+            opcode,
+            timestamp: Number(timestamp),
+            payload
+        };
+    }
+}
+
+// Export for use
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = ProtocolClient;
+}
+```
+
+**Requirements**:
+- Match Go implementation exactly
+- Use Uint8Array for binary data
+- Handle endianness correctly (big-endian)
+- Include all opcodes
+- Provide encode/decode functions
+
+**Validation**:
+```bash
+# Verify file exists
+ls -la static/js/protocol.js
+```
+
+---
+
+#### STEP 4: Comprehensive Tests
+
+**Purpose**: Write comprehensive unit tests for the protocol
+
+**Implementation**:
+
+Create `pkg/protocol/protocol_test.go`:
+```go
+package protocol
+
+import (
+    "bytes"
+    "testing"
+    "time"
+)
+
+func TestMessageEncodeDecode(t *testing.T) {
+    tests := []struct {
+        name    string
+        opcode  Opcode
+        payload []byte
+    }{
+        {
+            name:    "display message",
+            opcode:  OpcodeDisplay,
+            payload: []byte("display data"),
+        },
+        {
+            name:    "input message",
+            opcode:  OpcodeInput,
+            payload: []byte(`{"type":"keydown","key":"a"}`),
+        },
+        {
+            name:    "auth message",
+            opcode:  OpcodeAuth,
+            payload: []byte(`{"token":"abc123"}`),
+        },
+        {
+            name:    "empty payload",
+            opcode:  OpcodePing,
+            payload: nil,
+        },
+    }
+
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            // Create message
+            msg := NewMessage(tt.opcode, tt.payload)
+            
+            // Encode
+            encoded, err := msg.Encode()
+            if err != nil {
+                t.Fatalf("Encode failed: %v", err)
+            }
+            
+            // Verify magic bytes
+            if !bytes.Equal(encoded[0:4], MagicBytes[:]) {
+                t.Error("Magic bytes mismatch")
+            }
+            
+            // Verify version
+            if encoded[4] != ProtocolVersion {
+                t.Error("Version mismatch")
+            }
+            
+            // Decode
+            var decoded Message
+            if err := decoded.Decode(encoded); err != nil {
+                t.Fatalf("Decode failed: %v", err)
+            }
+            
+            // Verify opcode
+            if decoded.Opcode != tt.opcode {
+                t.Errorf("Opcode mismatch: got %v, want %v", decoded.Opcode, tt.opcode)
+            }
+            
+            // Verify payload
+            if !bytes.Equal(decoded.Payload, tt.payload) {
+                t.Errorf("Payload mismatch: got %v, want %v", decoded.Payload, tt.payload)
+            }
+        })
+    }
+}
+
+func TestMessageEncodeDecodeLargePayload(t *testing.T) {
+    // Test with 1MB payload
+    payload := make([]byte, 1024*1024)
+    for i := range payload {
+        payload[i] = byte(i % 256)
+    }
+    
+    msg := NewMessage(OpcodeDisplay, payload)
+    encoded, err := msg.Encode()
+    if err != nil {
+        t.Fatalf("Encode failed: %v", err)
+    }
+    
+    if len(encoded) != HeaderSize+len(payload) {
+        t.Errorf("Encoded size mismatch: got %d, want %d", len(encoded), HeaderSize+len(payload))
+    }
+    
+    var decoded Message
+    if err := decoded.Decode(encoded); err != nil {
+        t.Fatalf("Decode failed: %v", err)
+    }
+    
+    if !bytes.Equal(decoded.Payload, payload) {
+        t.Error("Large payload mismatch")
+    }
+}
+
+func TestMessageErrors(t *testing.T) {
+    tests := []struct {
+        name    string
+        data    []byte
+        wantErr error
+    }{
+        {
+            name:    "buffer too small",
+            data:    []byte{0x57, 0x45, 0x42, 0x53, 1, 1},
+            wantErr: ErrBufferTooSmall,
+        },
+        {
+            name:    "invalid magic",
+            data:    make([]byte, 20),
+            wantErr: ErrInvalidMagic,
+        },
+        {
+            name:    "invalid version",
+            data:    append(append([]byte("WEBS"), 2), make([]byte, 16)...),
+            wantErr: ErrInvalidVersion,
+        },
+    }
+
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            var msg Message
+            err := msg.Decode(tt.data)
+            if err != tt.wantErr {
+                t.Errorf("got %v, want %v", err, tt.wantErr)
+            }
+        })
+    }
+}
+
+func TestOpcodeString(t *testing.T) {
+    tests := []struct {
+        opcode Opcode
+        want   string
+    }{
+        {OpcodeDisplay, "DISPLAY"},
+        {OpcodeInput, "INPUT"},
+        {OpcodeFileSystem, "FILESYSTEM"},
+    }
+
+    for _, tt := range tests {
+        if got := tt.opcode.String(); got != tt.want {
+            t.Errorf("Opcode.String() = %v, want %v", got, tt.want)
+        }
+    }
+}
+
+func BenchmarkMessageEncode(b *testing.B) {
+    msg := NewMessage(OpcodeDisplay, []byte("test payload"))
+    b.ResetTimer()
+    for i := 0; i < b.N; i++ {
+        msg.Encode()
+    }
+}
+
+func BenchmarkMessageDecode(b *testing.B) {
+    msg := NewMessage(OpcodeDisplay, []byte("test payload"))
+    encoded, _ := msg.Encode()
+    b.ResetTimer()
+    for i := 0; i < b.N; i++ {
+        var m Message
+        m.Decode(encoded)
+    }
+}
+```
+
+**Requirements**:
+- Test all opcodes
+- Test empty and large payloads
+- Test error cases
+- Test performance with benchmarks
+- Achieve 100% coverage
+
+**Validation**:
+```bash
+go test ./pkg/protocol/ -v -cover
+go test ./pkg/protocol/ -race
+go test ./pkg/protocol/ -bench=.
+```
+
+---
+
+#### STEP 5: Demo Program
+
+**Purpose**: Create a demonstration program showing protocol usage
+
+**Implementation**:
+
+Create `cmd/protocol-demo/main.go`:
+```go
+package main
+
+import (
+    "fmt"
+    "log"
+    "time"
+    
+    "webos/pkg/protocol"
+)
+
+func main() {
+    fmt.Println("WebOS Protocol Demo")
+    fmt.Println("===================")
+    fmt.Println()
+    
+    // 1. Creating and encoding messages
+    fmt.Println("1. Creating and encoding messages...")
+    
+    connectMsg := protocol.NewMessage(
+        protocol.OpcodeConnect,
+        []byte(`{"clientId":"web-client-123","version":"1.0"}`),
+    )
+    encoded, err := connectMsg.Encode()
+    if err != nil {
+        log.Fatal(err)
+    }
+    fmt.Printf("   Connect message encoded: %d bytes\n", len(encoded))
+    
+    textMsg := protocol.NewMessage(
+        protocol.OpcodeDisplay,
+        []byte("Hello, WebOS!"),
+    )
+    encoded, err = textMsg.Encode()
+    if err != nil {
+        log.Fatal(err)
+    }
+    fmt.Printf("   Text message encoded: %d bytes\n", len(encoded))
+    
+    // Large binary message
+    binaryData := make([]byte, 256)
+    for i := range binaryData {
+        binaryData[i] = byte(i)
+    }
+    binaryMsg := protocol.NewMessage(protocol.OpcodeFileSystem, binaryData)
+    encoded, err = binaryMsg.Encode()
+    if err != nil {
+        log.Fatal(err)
+    }
+    fmt.Printf("   Binary message encoded: %d bytes\n", len(encoded))
+    fmt.Println()
+    
+    // 2. Decoding messages
+    fmt.Println("2. Decoding messages...")
+    
+    // Decode connect message
+    var decoded protocol.Message
+    if err := decoded.Decode(encoded); err != nil {
+        log.Fatal(err)
+    }
+    fmt.Printf("   Decoded: Message{Opcode: %s, PayloadSize: %d}\n",
+        decoded.Opcode, len(decoded.Payload))
+    fmt.Printf("   Payload: %s\n", string(decoded.Payload))
+    fmt.Println()
+    
+    // 3. Testing error handling
+    fmt.Println("3. Testing error handling...")
+    
+    // Invalid magic
+    invalidData := make([]byte, 20)
+    var invalidMsg protocol.Message
+    err = invalidMsg.Decode(invalidData)
+    if err == protocol.ErrInvalidMagic {
+        fmt.Printf("   ✓ Invalid magic error: %v\n", err)
+    }
+    
+    // Truncated message
+    truncatedData := []byte("WEBS\x01\x01" + string(make([]byte, 5)))
+    var truncatedMsg protocol.Message
+    err = truncatedMsg.Decode(truncatedData)
+    if err == protocol.ErrBufferTooSmall {
+        fmt.Printf("   ✓ Truncated message error: %v\n", err)
+    }
+    fmt.Println()
+    
+    // 4. Available opcodes
+    fmt.Println("4. Available opcodes:")
+    for i := protocol.OpcodeDisplay; i <= protocol.OpcodeError; i++ {
+        fmt.Printf("   %d: %s\n", i, i)
+    }
+    fmt.Println()
+    
+    // 5. Timing information
+    fmt.Println("5. Timing information:")
+    start := time.Now()
+    for i := 0; i < 10000; i++ {
+        msg := protocol.NewMessage(protocol.OpcodeDisplay, []byte("test"))
+        msg.Encode()
+    }
+    elapsed := time.Since(start)
+    fmt.Printf("   10,000 encode operations: %v\n", elapsed)
+    fmt.Printf("   Average per operation: %v\n", elapsed/10000)
+    fmt.Println()
+    
+    // 6. Testing payload size limits
+    fmt.Println("6. Testing payload size limits...")
+    maxPayload := make([]byte, 16*1024*1024) // 16 MB
+    maxMsg := protocol.NewMessage(protocol.OpcodeDisplay, maxPayload)
+    _, err = maxMsg.Encode()
+    if err != nil {
+        fmt.Printf("   ✗ Max payload encoding failed: %v\n", err)
+    } else {
+        fmt.Printf("   ✓ Max payload (16 MB) encoded successfully\n")
+    }
+    
+    // Too large
+    tooLargePayload := make([]byte, 17*1024*1024) // 17 MB
+    tooLargeMsg := protocol.NewMessage(protocol.OpcodeDisplay, tooLargePayload)
+    _, err = tooLargeMsg.Encode()
+    if err == protocol.ErrPayloadTooLarge {
+        fmt.Printf("   ✓ Payload too large correctly rejected\n")
+    }
+    fmt.Println()
+    
+    fmt.Println("Demo completed successfully!")
+}
+```
+
+**Requirements**:
+- Demonstrate message creation and encoding
+- Show message decoding
+- Test error handling
+- Display all opcodes
+- Include timing benchmarks
+- Test payload size limits
+
+**Validation**:
+```bash
+go run ./cmd/protocol-demo/main.go
+```
+
+---
+
+### Testing Requirements
+
+**Test Coverage**: Minimum 85% for this sub-phase
+
+**Required Test Cases**:
+
+1. **Message Encoding/Decoding**:
+   - Test: Encode and decode messages with various opcodes
+   - Expected: All messages encode/decode correctly with matching data
+
+2. **Payload Handling**:
+   - Test: Empty payload messages
+   - Expected: Messages encode/decode without issues
+   - Test: Large payloads (1MB+)
+   - Expected: Large payloads handled correctly
+
+3. **Error Cases**:
+   - Test: Invalid magic bytes
+   - Expected: ErrInvalidMagic returned
+   - Test: Buffer too small
+   - Expected: ErrBufferTooSmall returned
+   - Test: Invalid opcode
+   - Expected: ErrInvalidOpcode returned
+
+4. **Edge Cases**:
+   - Test: Maximum payload size (16MB)
+   - Expected: Encoding succeeds
+   - Test: Payload exceeding maximum
+   - Expected: ErrPayloadTooLarge returned
+
+5. **Concurrency**:
+   - Test: Concurrent encode/decode operations
+   - Expected: No race conditions
+
+**Test Implementation Template**:
+
+```go
+func Test[FunctionName](t *testing.T) {
+    tests := []struct {
+        name    string
+        input   [type]
+        want    [type]
+        wantErr bool
+    }{
+        {
+            name:    "[test case name]",
+            input:   [input value],
+            want:    [expected output],
+            wantErr: false,
+        },
+    }
+    
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            got, err := [FunctionCall](tt.input)
+            if (err != nil) != tt.wantErr {
+                t.Errorf("error = %v, wantErr %v", err, tt.wantErr)
+                return
+            }
+            if got != tt.want {
+                t.Errorf("got %v, want %v", got, tt.want)
+            }
+        })
+    }
+}
+```
+
+---
+
+### Demonstration Program
+
+Create `cmd/protocol-demo/main.go` that demonstrates:
+
+1. **Basic Usage**: Creating and encoding messages
+2. **Decoding**: Parsing messages from binary data
+3. **Error Handling**: Testing invalid messages
+4. **Opcode Display**: Listing all available opcodes
+5. **Performance**: Timing encode/decode operations
+
+**Demo Requirements**:
+- Must be runnable with `go run cmd/protocol-demo/main.go`
+- Must produce clear, formatted output
+- Must demonstrate ALL key functionality
+- Must show successful and error cases
+- Must include timing/performance metrics
+
+**Expected Output Format**:
+```
+WebOS Protocol Demo
+===================
+
+1. Creating and encoding messages...
+   Connect message encoded: 58 bytes
+   Text message encoded: 24 bytes
+   Binary message encoded: 266 bytes
+
+2. Decoding messages...
+   Decoded: Message{Opcode: DISPLAY, PayloadSize: 14}
+   Payload: Hello, WebOS!
+
+3. Testing error handling...
+   Invalid magic error: invalid magic bytes
+   Truncated message error: truncated message
+
+4. Available opcodes:
+   1: DISPLAY
+   2: INPUT
+   ...
+
+5. Testing encode/decode determinism...
+   ✓ Encoding is deterministic (same input = same output)
+   ✓ Decoding is deterministic
+
+Demo completed successfully!
+```
+
+---
+
+### Integration Requirements
+
+**This sub-phase must integrate with**:
+- None (foundational phase)
+
+**Integration Tests**:
+
+Create `pkg/protocol/integration_test.go` that tests:
+1. Protocol compatibility between Go and JavaScript implementations
+2. Round-trip encoding/decoding consistency
+
+```go
+func TestGoJavaScriptCompatibility(t *testing.T) {
+    // Test that Go-encoded messages can be decoded by JS and vice versa
+}
+```
+
+---
+
+### Documentation Requirements
+
+**Package Documentation** (`pkg/protocol/doc.go`):
+```go
+// Package protocol implements the WebOS binary communication protocol.
+//
+// This package provides the core messaging protocol for communication
+// between the browser client and Go backend services. The protocol
+// uses a compact binary format with the following structure:
+//
+//   - Magic Bytes: 4 bytes ("WEBS")
+//   - Version: 1 byte
+//   - Opcode: 1 byte (message type)
+//   - Timestamp: 8 bytes (Unix nanoseconds)
+//   - Payload Length: 4 bytes
+//   - Payload: N bytes
+//
+// # Usage
+//
+//   msg := protocol.NewMessage(protocol.OpcodeDisplay, []byte("data"))
+//   encoded, err := msg.Encode()
+//
+// # Architecture
+//
+// The protocol is designed for:
+// - Low-latency communication
+// - Efficient binary encoding
+// - Cross-platform compatibility
+//
+// # Examples
+//
+// See cmd/protocol-demo/main.go for complete examples.
+package protocol
+```
+
+**Function Documentation**:
+- Every exported function must have a doc comment
+- Format: `// [FunctionName] [what it does]`
+- Include parameter descriptions if non-obvious
+- Include example usage for complex functions
+- Document error return conditions
+
+**Type Documentation**:
+- Every exported type must have a doc comment
+- Explain what the type represents
+- Document zero value behavior
+- Document thread-safety properties
+
+---
+
+### Validation Checklist
+
+Before marking this sub-phase complete, verify:
+
+**Code Quality**:
+- [ ] All code compiles without warnings
+- [ ] `go vet ./pkg/protocol/...` passes with no issues
+- [ ] `go fmt` has been run on all files
+- [ ] No TODO comments remain in code
+- [ ] All exported symbols are documented
+- [ ] Code follows Go conventions (effective Go)
+- [ ] Maximum function length: 50 lines (excluding comments)
+- [ ] No panics in production code paths
+
+**Testing**:
+- [ ] All tests pass: `go test ./pkg/protocol/ -v`
+- [ ] No race conditions: `go test ./pkg/protocol/ -race`
+- [ ] Test coverage ≥85%: `go test ./pkg/protocol/ -cover`
+- [ ] Benchmarks run: `go test ./pkg/protocol/ -bench=.`
+- [ ] All error paths tested
+- [ ] Edge cases covered
+
+**Integration**:
+- [ ] JavaScript protocol implementation exists
+- [ ] JavaScript can decode Go-encoded messages
+- [ ] Go can decode JavaScript-encoded messages
+
+**Demonstration**:
+- [ ] Demo program compiles
+- [ ] Demo runs without errors
+- [ ] Demo output is clear and correct
+- [ ] Demo shows all key features
+
+**Documentation**:
+- [ ] Package doc.go exists and is comprehensive
+- [ ] Protocol specification document exists
+- [ ] All exported symbols documented
+- [ ] Examples compile and run
+
+**Performance**:
+- [ ] No obvious performance issues
+- [ ] Benchmarks show acceptable performance (<1μs per encode/decode)
+- [ ] Memory usage is reasonable
+- [ ] No memory leaks
+
+---
+
+### Acceptance Criteria
+
+This sub-phase is considered complete when:
+
+1. ✅ **All validation checklist items are checked**
+2. ✅ **Code review reveals no issues** (self-review minimum)
+3. ✅ **Demonstration program runs successfully** and shows expected output
+4. ✅ **All tests pass** including race detector
+5. ✅ **Coverage meets minimum** 85% threshold
+6. ✅ **JavaScript implementation verified** to be compatible with Go
+7. ✅ **Documentation is complete** and clear
+8. ✅ **No external dependencies** introduced
+
+**Success Metrics**:
+- Test coverage: 100%
+- Benchmarks: Encode <500ns, Decode <500ns
+- Memory usage: Minimal allocations
+
+---
+
+### Troubleshooting Guide
+
+**Common Issues**:
+
+**Issue**: Magic bytes validation fails
+- **Symptom**: `ErrInvalidMagic` returned for valid messages
+- **Cause**: Byte order or encoding mismatch
+- **Solution**: Ensure consistent big-endian encoding across Go and JS
+
+**Issue**: Large payloads fail to decode
+- **Symptom**: `ErrBufferTooSmall` with valid large data
+- **Cause**: Buffer allocation too small
+- **Solution**: Check payload length calculation includes header size
+
+**Issue**: Timestamp values don't match
+- **Symptom**: Timestamp differences between Go and JS
+- **Cause**: JavaScript uses milliseconds, Go uses nanoseconds
+- **Solution**: Ensure consistent time unit conversion
+
+---
+
+### Deliverables Summary
+
+Upon completion, you must have:
+
+1. **Source Code**:
+   - [ ] `pkg/protocol/doc.go`
+   - [ ] `pkg/protocol/opcode.go`
+   - [ ] `pkg/protocol/message.go`
+   - [ ] `pkg/protocol/codec.go`
+   - [ ] `static/js/protocol.js`
+   - [ ] `docs/PROTOCOL_SPEC.md`
+
+2. **Tests**:
+   - [ ] `pkg/protocol/protocol_test.go`
+   - [ ] `pkg/protocol/integration_test.go`
+
+3. **Demonstration**:
+   - [ ] `cmd/protocol-demo/main.go`
+
+4. **Documentation**:
+   - [ ] Package documentation in doc.go
+   - [ ] Protocol specification in docs/
+   - [ ] Code comments on all exports
+
+5. **Verification**:
+   - [ ] Test output logs showing all passing
+   - [ ] Coverage report showing ≥85%
+   - [ ] Demo execution showing success
+
+---
+
+### Next Sub-Phase
+
+After completing this sub-phase, proceed to:
+**PHASE 1.2**: WebSocket Server & Connection Management
+
+**What it will build on**:
+- The protocol implementation from this phase
+- Message encoding/decoding functions
+- Error handling patterns
+- JavaScript protocol client
+
+---
+
+## TEMPLATE END
+
+---
+
+## EXAMPLE: FILLED TEMPLATE
+
+[See TEMPLATE.md for example]
+
+---
+
+## USAGE INSTRUCTIONS FOR AI AGENTS
+
+When you receive a filled template like this:
+
+1. **Read the entire prompt first** - don't start coding until you understand the complete picture
+2. **Follow steps sequentially** - complete each step before moving to the next
+3. **Run validation after each step** - ensure code compiles and works
+4. **Write tests alongside code** - don't leave testing until the end
+5. **Verify integration** - ensure it works with previous sub-phases
+6. **Create the demo** - prove it works end-to-end
+7. **Check the completion criteria** - mark each item as done
+8. **Review your work** - self-review before declaring completion
+
+**Do NOT proceed to next sub-phase until**:
+- All tests pass
+- Demo runs successfully  
+- Coverage ≥ 85%
+- Integration verified
+- All checklist items checked
