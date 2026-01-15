@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebOS Client</title>
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <div id="desktop">
+        <canvas id="display-canvas"></canvas>
+        <div id="window-layer"></div>
+        <div id="ui-layer">
+            <div id="taskbar">
+                <div id="start-button">Start</div>
+                <div id="taskbar-items"></div>
+                <div id="system-tray"></div>
+            </div>
+        </div>
+    </div>
+    <div id="connection-status" class="status-connecting">Connecting...</div>
+    <div id="login-modal" class="modal hidden">
+        <div class="modal-content">
+            <h2>WebOS Login</h2>
+            <form id="login-form">
+                <input type="text" id="username" placeholder="Username" required>
+                <input type="password" id="password" placeholder="Password" required>
+                <button type="submit">Login</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Protocol module (from Phase 1.1) -->
+    <script src="/js/protocol.js"></script>
+    
+    <!-- Client modules -->
+    <script src="/js/doc.js"></script>
+    <script src="/js/state.js"></script>
+    <script src="/js/connection.js"></script>
+    <script src="/js/display.js"></script>
+    <script src="/js/input.js"></script>
+    <script src="/js/shell.js"></script>
+    <script src="/js/client.js"></script>
+</body>
+</html>

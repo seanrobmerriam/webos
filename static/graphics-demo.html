@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Graphics Library Demo</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            color: #00d4ff;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        .canvas-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .canvas-container {
+            background: #16213e;
+            border-radius: 10px;
+            padding: 15px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }
+        
+        .canvas-container h2 {
+            color: #00d4ff;
+            margin-bottom: 10px;
+            font-size: 1.2em;
+        }
+        
+        canvas {
+            background: #0f0f23;
+            border-radius: 5px;
+            width: 100%;
+            height: 300px;
+            display: block;
+        }
+        
+        .controls {
+            background: #16213e;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 30px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }
+        
+        .controls h2 {
+            color: #00d4ff;
+            margin-bottom: 15px;
+        }
+        
+        .control-row {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        
+        .control-row label {
+            color: #aaa;
+            min-width: 100px;
+        }
+        
+        button {
+            background: #00d4ff;
+            color: #1a1a2e;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.3s;
+        }
+        
+        button:hover {
+            background: #00a8cc;
+            transform: translateY(-2px);
+        }
+        
+        button.secondary {
+            background: #4a4a6a;
+            color: #eee;
+        }
+        
+        button.secondary:hover {
+            background: #5a5a7a;
+        }
+        
+        .test-results {
+            background: #16213e;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }
+        
+        .test-results h2 {
+            color: #00d4ff;
+            margin-bottom: 15px;
+        }
+        
+        .test-output {
+            background: #0f0f23;
+            padding: 15px;
+            border-radius: 5px;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        
+        .test-output .pass {
+            color: #00ff88;
+        }
+        
+        .test-output .fail {
+            color: #ff4444;
+        }
+        
+        .test-output .info {
+            color: #aaa;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Graphics Library Demo</h1>
+        
+        <div class="controls">
+            <h2>Controls</h2>
+            <div class="control-row">
+                <button onclick="runDemo()">Re-run Demo</button>
+                <button class="secondary" onclick="runTests()">Run Tests</button>
+                <button class="secondary" onclick="clearCanvases()">Clear All</button>
+            </div>
+        </div>
+        
+        <div class="canvas-grid">
+            <div class="canvas-container">
+                <h2>Basic Shapes</h2>
+                <canvas id="shapesCanvas"></canvas>
+            </div>
+            
+            <div class="canvas-container">
+                <h2>Transformations</h2>
+                <canvas id="transformCanvas"></canvas>
+            </div>
+            
+            <div class="canvas-container">
+                <h2>Text Rendering</h2>
+                <canvas id="textCanvas"></canvas>
+            </div>
+            
+            <div class="canvas-container">
+                <h2>Shapes Library</h2>
+                <canvas id="shapesLibCanvas"></canvas>
+            </div>
+            
+            <div class="canvas-container">
+                <h2>Animation Demo</h2>
+                <canvas id="animationCanvas"></canvas>
+            </div>
+            
+            <div class="canvas-container">
+                <h2>Composite Operations</h2>
+                <canvas id="compositeCanvas"></canvas>
+            </div>
+        </div>
+        
+        <div class="test-results">
+            <h2>Test Results</h2>
+            <div class="test-output" id="testOutput">
+                <span class="info">Click "Run Tests" to execute the test suite...</span>
+            </div>
+        </div>
+    </div>
+    
+    <script src="graphics.js"></script>
+    <script src="shapes.js"></script>
+    <script src="graphics_test.js"></script>
+    
+    <script>
+        // Demo runner
+        function runDemo() {
+            demoBasicShapes();
+            demoTransformations();
+            demoTextRendering();
+            demoShapesLibrary();
+            demoAnimation();
+            demoCompositeOperations();
+        }
+        
+        // Demo 1: Basic Shapes
+        function demoBasicShapes() {
+            const canvas = document.getElementById('shapesCanvas');
+            canvas.width = 480;
+            canvas.height = 300;
+            const g = new Graphics(canvas);
+            g.clear();
+            
+            // Background
+            g.drawRect(0, 0, canvas.width, canvas.height, '#1e1e3f');
+            
+            // Filled rectangle
+            g.drawRect(20, 20, 100, 60, '#ff6b6b');
+            
+            // Rectangle outline
+            g.drawRectOutline(140, 20, 100, 60, '#4ecdc4', 3);
+            
+            // Filled circle
+            g.drawCircle(70, 150, 40, '#ffe66d');
+            
+            // Circle outline
+            g.drawCircleOutline(180, 150, 40, '#95e1d3', 3);
+            
+            // Line
+            g.drawLine(250, 110, 350, 190, '#f38181', 4);
+            
+            // Triangle polygon
+            g.drawPolygon([
+                { x: 380, y: 50 },
+                { x: 430, y: 150 },
+                { x: 330, y: 150 }
+            ], '#aa96da');
+            
+            // Rounded rectangle
+            g.drawRoundedRect(20, 220, 120, 50, 10, '#fcbad3');
+            
+            // Ellipse
+            g.drawEllipse(250, 245, 50, 25, 0, 0, Math.PI * 2, '#a8d8ea');
+            
+            // Quadratic curve
+            g.drawQuadraticCurve(350, 220, 420, 270, '#ff9a8b', 3);
+        }
+        
+        // Demo 2: Transformations
+        function demoTransformations() {
+            const canvas = document.getElementById('transformCanvas');
+            canvas.width = 480;
+            canvas.height = 300;
+            const g = new Graphics(canvas);
+            g.clear();
+            
+            g.drawRect(0, 0, canvas.width, canvas.height, '#1e1e3f');
+            
+            // Original position
+            g.save();
+            g.translate(50, 50);
+            g.drawRect(0, 0, 50, 50, '#ff6b6b');
+            g.restore();
+            
+            // Translated
+            g.save();
+            g.translate(150, 50);
+            g.drawRect(0, 0, 50, 50, '#4ecdc4');
+            g.restore();
+            
+            // Scaled
+            g.save();
+            g.translate(250, 50);
+            g.scale(1.5, 1.5);
+            g.drawRect(0, 0, 50, 50, '#ffe66d');
+            g.restore();
+            
+            // Rotated
+            g.save();
+            g.translate(400, 100);
+            g.rotate(Math.PI / 4);
+            g.drawRect(-25, -25, 50, 50, '#f38181');
+            g.restore();
+            
+            // Combined transformation
+            g.save();
+            g.translate(240, 200);
+            g.rotate(Math.PI / 6);
+            g.scale(0.8, 0.8);
+            g.drawRect(-30, -30, 60, 60, '#aa96da');
+            g.restore();
+            
+            // Clip demo
+            g.save();
+            g.clip(0, 200, 120, 80);
+            g.fill('#fcbad3');
+            g.restore();
+        }
+        
+        // Demo 3: Text Rendering
+        function demoTextRendering() {
+            const canvas = document.getElementById('textCanvas');
+            canvas.width = 480;
+            canvas.height = 300;
+            const g = new Graphics(canvas);
+            g.clear();
+            
+            g.drawRect(0, 0, canvas.width, canvas.height, '#1e1e3f');
+            
+            // Basic text
+            g.drawText('Hello, Graphics!', 20, 30, '24px Arial', '#ffffff');
+            
+            // Different fonts
+            g.drawText('Serif Font', 20, 70, '20px Georgia', '#ff6b6b');
+            g.drawText('Monospace', 20, 100, '18px Courier New', '#4ecdc4');
+            g.drawText('Large Sans', 20, 130, '28px Helvetica', '#ffe66d');
+            
+            // Text with alignment
+            g.drawText('Centered Text', 240, 180, '16px Arial', '#f38181', {
+                textAlign: 'center'
+            });
+            g.drawText('Right Aligned', 460, 220, '16px Arial', '#aa96da', {
+                textAlign: 'right'
+            });
+            
+            // Text with outline
+            g.drawTextOutline('Outlined', 20, 240, 'bold 20px Arial', '#fcbad3', '#ffffff', 1);
+            
+            // Text measurement
+            const metrics = g.measureText('Measured Text', '16px Arial');
+            g.drawText(`Width: ${metrics.width.toFixed(1)}px`, 20, 280, '12px monospace', '#aaa');
+        }
+        
+        // Demo 4: Shapes Library
+        function demoShapesLibrary() {
+            const canvas = document.getElementById('shapesLibCanvas');
+            canvas.width = 480;
+            canvas.height = 300;
+            const g = new Graphics(canvas);
+            g.clear();
+            
+            g.drawRect(0, 0, canvas.width, canvas.height, '#1e1e3f');
+            
+            // Using Shape classes
+            const rect = new Shapes.rect(20, 20, 80, 50, { fill: '#ff6b6b' });
+            rect.draw(g);
+            
+            const circle = new Shapes.circle(150, 70, 35, { fill: '#4ecdc4' });
+            circle.draw(g);
+            
+            const line = new Shapes.line(220, 35, 300, 105, { stroke: '#ffe66d', strokeWidth: 4 });
+            line.draw(g);
+            
+            const polygon = new Shapes.polygon([
+                { x: 350, y: 20 },
+                { x: 420, y: 70 },
+                { x: 400, y: 130 },
+                { x: 300, y: 130 },
+                { x: 280, y: 70 }
+            ], { fill: '#f38181' });
+            polygon.draw(g);
+            
+            // Regular polygon (hexagon)
+            const hex = Shapes.regularPolygon(80, 220, 6, 40, { fill: '#aa96da' });
+            hex.draw(g);
+            
+            // Star shape
+            const star = Shapes.star(200, 220, 5, 45, 20, { fill: '#fcbad3' });
+            star.draw(g);
+            
+            // Triangle
+            const tri = Shapes.triangle(320, 180, 380, 260, 260, 260, { fill: '#a8d8ea' });
+            tri.draw(g);
+            
+            // Rounded rectangle with stroke
+            const roundedRect = new Shapes.roundedRect(400, 190, 60, 60, 15, {
+                fill: '#ff9a8b',
+                stroke: '#ffffff',
+                strokeWidth: 2
+            });
+            roundedRect.draw(g);
+        }
+        
+        // Demo 5: Animation
+        let animationId = null;
+        let animationTime = 0;
+        
+        function demoAnimation() {
+            const canvas = document.getElementById('animationCanvas');
+            canvas.width = 480;
+            canvas.height = 300;
+            const g = new Graphics(canvas);
+            
+            function animate() {
+                animationTime += 0.02;
+                g.clear();
+                
+                g.drawRect(0, 0, canvas.width, canvas.height, '#1e1e3f');
+                
+                // Bouncing ball
+                const ballX = 240 + Math.sin(animationTime) * 150;
+                const ballY = 150 + Math.cos(animationTime * 1.5) * 80;
+                g.drawCircle(ballX, ballY, 25, '#ff6b6b');
+                
+                // Pulsing circle
+                const pulseScale = 1 + Math.sin(animationTime * 2) * 0.3;
+                g.save();
+                g.translate(80, 150);
+                g.scale(pulseScale, pulseScale);
+                g.drawCircle(0, 0, 20, '#4ecdc4');
+                g.restore();
+                
+                // Rotating rectangle
+                g.save();
+                g.translate(400, 150);
+                g.rotate(animationTime * 2);
+                g.drawRect(-25, -15, 50, 30, '#ffe66d');
+                g.restore();
+                
+                // Wave effect
+                for (let i = 0; i < 10; i++) {
+                    const y = 260;
+                    const x = 40 + i * 45;
+                    const height = 20 + Math.sin(animationTime + i * 0.5) * 15;
+                    g.drawRect(x, y - height / 2, 30, height, `hsl(${(i * 30 + animationTime * 50) % 360}, 70%, 60%)`);
+                }
+                
+                animationId = requestAnimationFrame(animate);
+            }
+            
+            animate();
+        }
+        
+        // Demo 6: Composite Operations
+        function demoCompositeOperations() {
+            const canvas = document.getElementById('compositeCanvas');
+            canvas.width = 480;
+            canvas.height = 300;
+            const g = new Graphics(canvas);
+            g.clear();
+            
+            g.drawRect(0, 0, canvas.width, canvas.height, '#1e1e3f');
+            
+            // Different blend modes
+            const modes = ['source-over', 'multiply', 'screen', 'overlay', 'lighten'];
+            const colors = ['#ff6b6b', '#4ecdc4', '#ffe66d', '#f38181', '#aa96da'];
+            
+            for (let i = 0; i < modes.length; i++) {
+                const x = 20 + i * 90;
+                const y = 20;
+                
+                // Background circle
+                g.setGlobalCompositeOperation('source-over');
+                g.drawCircle(x + 30, y + 30, 35, '#333');
+                
+                // Colored circle with blend mode
+                g.setGlobalCompositeOperation(modes[i]);
+                g.drawCircle(x + 30, y + 30, 25, colors[i]);
+            }
+            
+            // Alpha transparency demo
+            g.setGlobalCompositeOperation('source-over');
+            g.drawText('Alpha Blending:', 20, 120, '14px Arial', '#aaa');
+            
+            for (let i = 0; i < 5; i++) {
+                g.drawCircle(80 + i * 50, 150, 30, `rgba(255, 107, 107, ${0.2 + i * 0.15})`);
+            }
+            
+            // Shadow demo
+            g.setGlobalCompositeOperation('source-over');
+            g.setShadow('#000000', 10, 5, 5);
+            g.drawRect(20, 200, 80, 50, '#4ecdc4');
+            g.clearShadow();
+            
+            g.drawText('With Shadow', 25, 230, '14px Arial', '#fff');
+        }
+        
+        // Clear all canvases
+        function clearCanvases() {
+            if (animationId) {
+                cancelAnimationFrame(animationId);
+            }
+            
+            const canvases = document.querySelectorAll('canvas');
+            canvases.forEach(canvas => {
+                const g = new Graphics(canvas);
+                g.clear();
+            });
+        }
+        
+        // Run tests
+        function runTests() {
+            const output = document.getElementById('testOutput');
+            output.innerHTML = '';
+            
+            const log = (text, className = 'info') => {
+                const span = document.createElement('div');
+                span.textContent = text;
+                span.className = className;
+                output.appendChild(span);
+            };
+            
+            log('Running Graphics Library Tests...', 'info');
+            log('='.repeat(50), 'info');
+            
+            try {
+                const success = runAllTests();
+                log('='.repeat(50), 'info');
+                if (success) {
+                    log('All tests passed!', 'pass');
+                } else {
+                    log('Some tests failed. Check the output above.', 'fail');
+                }
+            } catch (e) {
+                log(`Error running tests: ${e.message}`, 'fail');
+            }
+        }
+        
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            runDemo();
+        });
+    </script>
+</body>
+</html>

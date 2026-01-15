@@ -1,0 +1,179 @@
+package main
+
+import (
+	"bufio"
+	"fmt"
+	"os"
+	"strings"
+
+	"github.com/webos-ports/webos/pkg/pty"
+)
+
+func main() {
+	fmt.Println("WebOS PTY (Pseudo-Terminal) Demo")
+	fmt.Println("================================")
+	fmt.Println()
+
+	// Create a new terminal
+	term, err := pty.NewTerminal(80, 24)
+	if err != nil {
+		fmt.Printf("Failed to create terminal: %v\n", err)
+		os.Exit(1)
+	}
+	defer term.Close()
+
+	fmt.Printf("Created terminal: %d cols x %d rows\n", term.Cols, term.Rows)
+	fmt.Println()
+
+	// Create a PTY
+	pt, err := pty.NewPTY(80, 24)
+	if err != nil {
+		fmt.Printf("Failed to create PTY: %v\n", err)
+		os.Exit(1)
+	}
+	defer pt.Close()
+
+	fmt.Printf("Created PTY: master=%p, slave=%p\n", pt.Master(), pt.Slave())
+	fmt.Println()
+
+	// Demonstrate terminal operations
+	demoTerminal(term)
+
+	// Demonstrate PTY operations
+	demoPTY(pt)
+
+	fmt.Println()
+	fmt.Println("Demo completed successfully!")
+}
+
+// demoTerminal demonstrates terminal operations
+func demoTerminal(term *pty.Terminal) {
+	fmt.Println("--- Terminal Demo ---")
+	fmt.Println()
+
+	// Write some text
+	fmt.Println("Writing text to terminal...")
+	term.Write([]byte("Hello, Terminal!\n"))
+	term.Write([]byte("This is a test of the terminal emulator.\n"))
+	term.Write([]byte("\n"))
+
+	// Test cursor movement
+	fmt.Println("Testing cursor movement...")
+	term.MoveCursorTo(1, 1)
+	term.Write([]byte("Cursor moved to (1,1)"))
+	term.MoveCursorTo(10, 3)
+	term.Write([]byte("Cursor at row 3, column 10"))
+
+	// Test colors (SGR sequences)
+	fmt.Println("\nTesting colors...")
+	term.Write([]byte("\n"))
+	term.SetGraphicsRendition([]int{31}) // Red
+	term.Write([]byte("This text is red\n"))
+	term.SetGraphicsRendition([]int{32}) // Green
+	term.Write([]byte("This text is green\n"))
+	term.SetGraphicsRendition([]int{33, 1}) // Yellow + Bold
+	term.Write([]byte("This text is yellow and bold\n"))
+	term.SetGraphicsRendition([]int{0}) // Reset
+
+	// Test clear operations
+	fmt.Println("Testing clear operations...")
+	term.ClearLine()
+	term.ClearToEndOfLine()
+	term.ClearToBeginningOfLine()
+	term.ClearScreen()
+
+	// Write fresh content after clear
+	term.Write([]byte("Screen cleared and fresh content:\n"))
+	for i := 1; i <= 5; i++ {
+		term.Write([]byte(fmt.Sprintf("Line %d\n", i)))
+	}
+
+	// Print screen dump
+	fmt.Println("\nScreen dump:")
+	fmt.Println("============")
+	fmt.Print(term.Dump())
+	fmt.Println("============")
+
+	// Test scrolling
+	fmt.Println("Testing scroll...")
+	for i := 6; i <= 30; i++ {
+		term.Write([]byte(fmt.Sprintf("Scroll line %d\n", i)))
+	}
+	fmt.Println("\nAfter scrolling:")
+	fmt.Print(term.Dump())
+}
+
+// demoPTY demonstrates PTY operations
+func demoPTY(pt *pty.PTY) {
+	fmt.Println("\n--- PTY Demo ---")
+	fmt.Println()
+
+	// Check terminal
+	term := pt.Terminal()
+	fmt.Printf("PTY Terminal: %d cols x %d rows\n", term.Cols, term.Rows)
+
+	// Test size operations
+	cols, rows, err := pt.Master().Size()
+	if err != nil {
+		fmt.Printf("Size() error: %v\n", err)
+	} else {
+		fmt.Printf("Initial size: %d cols x %d rows\n", cols, rows)
+	}
+
+	// Resize
+	if err := pt.Master().Resize(100, 40); err != nil {
+		fmt.Printf("Resize error: %v\n", err)
+	} else {
+		fmt.Println("Resized to 100x40")
+	}
+
+	// Get winsize
+	ws := pt.Master().GetWinsize()
+	fmt.Printf("Winsize: %d cols x %d rows\n", ws.Cols, ws.Rows)
+
+	// Write to terminal via master
+	fmt.Println("\nWriting to terminal via master...")
+	pt.Master().WriteToTerminal([]byte("Written via master side\n"))
+
+	// Parse ANSI
+	fmt.Println("Parsing ANSI escape sequences...")
+	ansiData := "\x1b[31mRed text\x1b[0m and \x1b[1;34mBold blue\x1b[0m\n"
+	pt.Master().ParseANSI([]byte(ansiData))
+
+	// Read output
+	fmt.Println("\nReading terminal output...")
+	output := pt.Master().DrainOutput()
+	if len(output) > 0 {
+		fmt.Printf("Output length: %d bytes\n", len(output))
+	}
+
+	// Interactive demo
+	fmt.Println("\n--- Interactive Mode ---")
+	fmt.Println("Type some text (or 'quit' to exit):")
+	fmt.Println("(Text will be written to the terminal)")
+	fmt.Println()
+
+	reader := bufio.NewReader(os.Stdin)
+	for {
+		fmt.Print("> ")
+		text, _ := reader.ReadString('\n')
+		text = strings.TrimSpace(text)
+
+		if text == "quit" || text == "exit" {
+			break
+		}
+
+		if text != "" {
+			// Write to terminal
+			pt.Master().WriteToTerminal([]byte(text + "\n"))
+
+			// Parse as ANSI (for escape sequences)
+			pt.Master().ParseANSI([]byte(text))
+
+			// Print screen
+			fmt.Println("\nScreen:")
+			fmt.Print(term.Dump())
+			fmt.Println()
+		}
+	}
+}
